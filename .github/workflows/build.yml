@@ -62,3 +62,9 @@ jobs:
         run: "./gradlew assemble${{ matrix.target }}"
       - name: "Execute Gradle lint"
         run: "./gradlew lint${{ matrix.target }}"
+      - name: "Upload Artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          name: ${{ matrix.target }}
+          path: play-services-core/build/outputs/apk/mapboxDefault/*/*.apk
