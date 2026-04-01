@@ -58,13 +58,35 @@ jobs:
               echo "Matcher configured: ${NAME:?}"
             fi
           done
+      - name: "Prepare release signing"
+        if: matrix.target == 'Release'
+        shell: bash
+        run: |
+          KEYSTORE_PATH="$RUNNER_TEMP/release-upload.jks"
+
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_PATH"
+
+          {
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH"
+            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
       - name: "Execute Gradle assemble"
         run: "./gradlew assemble${{ matrix.target }}"
       - name: "Execute Gradle lint"
         run: "./gradlew lint${{ matrix.target }}"
+      - name: "Rename APK in place"
+        shell: bash
+        run: |
+          APK="$(find play-services-core/build/outputs/apk/mapboxDefault -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+        
+          DIR="$(dirname "$APK")"
+          BASE="$(basename "$APK" .apk)"
+          mv "$APK" "$DIR/${BASE}-${{ matrix.target }}.apk"
       - name: "Upload Artifact"
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          name: ${{ matrix.target }}
           path: play-services-core/build/outputs/apk/mapboxDefault/*/*.apk
