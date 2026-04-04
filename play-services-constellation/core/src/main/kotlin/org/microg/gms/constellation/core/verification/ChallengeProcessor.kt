@@ -63,8 +63,15 @@ object ChallengeProcessor {
             val challengeId = challenge.challenge_id?.id ?: ""
             val remainingMillis = challengeTimeRemainingMillis(currentVerification)
             if (remainingMillis != null && remainingMillis <= 0L) {
-                Log.w(TAG, "Attempt $attempt: Challenge $challengeId expired before proceed")
-                return currentVerification
+                if (challenge.type == VerificationMethod.MT_SMS) {
+                    Log.w(
+                        TAG,
+                        "Attempt $attempt: Challenge $challengeId expired before MT wait. Proceeding with empty MT response."
+                    )
+                } else {
+                    Log.w(TAG, "Attempt $attempt: Challenge $challengeId expired before proceed")
+                    return currentVerification
+                }
             }
             Log.d(
                 TAG,

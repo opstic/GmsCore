@@ -15,6 +15,7 @@ import org.microg.gms.constellation.core.proto.ChallengeResponse
 import org.microg.gms.constellation.core.proto.MTChallenge
 import org.microg.gms.constellation.core.proto.MTChallengeResponseData
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 private const val TAG = "MtSmsVerifier"
@@ -25,7 +26,7 @@ suspend fun MTChallenge.verify(
 ): ChallengeResponse? {
     val expectedBody = sms.takeIf { it.isNotEmpty() } ?: return null
     val inbox = MtSmsInboxRegistry.get(subId)
-    val effectiveTimeoutMillis = timeoutMillis?.coerceIn(0L..300_000L) ?: 300_000L
+    val effectiveTimeoutMillis = timeoutMillis?.coerceAtLeast(0L) ?: TimeUnit.MINUTES.toMillis(30)
 
     Log.d(TAG, "Waiting for MT SMS containing challenge string")
 
