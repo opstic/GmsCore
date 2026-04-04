@@ -41,6 +41,7 @@ object ChallengeProcessor {
     ): Verification {
         var currentVerification = verification
         var moSession: MoSmsSession? = null
+        var carrierIdSession: CarrierIdSession? = null
 
         for (attempt in 1..MAX_PROCEED_ROUNDS) {
             if (currentVerification.state != Verification.State.PENDING) {
@@ -73,6 +74,7 @@ object ChallengeProcessor {
                     return currentVerification
                 }
             }
+
             Log.d(
                 TAG,
                 "Attempt $attempt: Solving challenge ID: $challengeId, Type: ${challenge.type}"
@@ -81,8 +83,12 @@ object ChallengeProcessor {
             val challengeImsi = currentVerification.association?.sim?.sim_info?.imsi?.firstOrNull()
             val info = imsiToInfoMap[challengeImsi]
             val subId = info?.subscriptionId ?: -1
+
             if (challenge.type != VerificationMethod.MO_SMS) {
                 moSession = null
+            }
+            if (challenge.type != VerificationMethod.CARRIER_ID || challenge.ts43_challenge != null) {
+                carrierIdSession = null
             }
 
             val challengeResponse: ChallengeResponse? = when (challenge.type) {
@@ -92,7 +98,31 @@ object ChallengeProcessor {
                     if (challenge.ts43_challenge != null) {
                         challenge.ts43_challenge.verify(context, subId)
                     } else {
-                        challenge.verifyCarrierId(context, subId)
+                        val activeSession =
+                            carrierIdSession?.takeIf { it.matches(challengeId, subId) }
+                                ?: CarrierIdSession(challengeId, subId).also {
+                                    carrierIdSession = it
+                                }
+
+                        activeSession.attempts += 1
+
+                        if (activeSession.attempts >= 4) {
+                            Log.w(
+                                TAG,
+                                "Attempt $attempt: Carrier ID challenge $challengeId is still pending after retry-exceeded response. Stopping."
+                            )
+                            return currentVerification
+                        }
+
+                        if (activeSession.attempts >= 3) {
+                            Log.w(
+                                TAG,
+                                "Attempt $attempt: Carrier ID challenge $challengeId exceeded retry budget. Proceeding with retry-exceeded response."
+                            )
+                            retryExceededCarrierId()
+                        } else {
+                            challenge.verifyCarrierId(context, subId)
+                        }
                     }
                 }
 
@@ -159,6 +189,18 @@ object ChallengeProcessor {
                 }
                 ConstellationStateStore.storeProceedResponse(context, proceedResponse)
                 currentVerification = proceedResponse.verification ?: currentVerification
+
+                if (challenge.type == VerificationMethod.CARRIER_ID) {
+                    val nextChallenge = currentVerification.pending_verification_info?.challenge
+                    val sameCarrierIdChallenge =
+                        nextChallenge?.type == VerificationMethod.CARRIER_ID &&
+                                nextChallenge.challenge_id?.id == challengeId &&
+                                nextChallenge.ts43_challenge == null
+
+                    if (!sameCarrierIdChallenge) {
+                        carrierIdSession = null
+                    }
+                }
             } else {
                 Log.w(
                     TAG,

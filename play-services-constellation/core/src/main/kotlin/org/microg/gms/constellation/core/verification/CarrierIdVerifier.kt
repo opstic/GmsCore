@@ -15,6 +15,16 @@ import org.microg.gms.constellation.core.proto.ChallengeResponse
 
 private const val TAG = "CarrierIdVerifier"
 
+internal data class CarrierIdSession(
+    val challengeId: String,
+    val subId: Int,
+    var attempts: Int = 0,
+) {
+    fun matches(challengeId: String, subId: Int): Boolean {
+        return this.challengeId == challengeId && this.subId == subId
+    }
+}
+
 fun Challenge.verifyCarrierId(context: Context, subId: Int): ChallengeResponse {
     val carrierChallenge = carrier_id_challenge ?: return failure(
         CarrierIdError.CARRIER_ID_ERROR_UNKNOWN_ERROR,
@@ -30,22 +40,25 @@ fun Challenge.verifyCarrierId(context: Context, subId: Int): ChallengeResponse {
         "No active subscription for carrier auth"
     )
 
-    val appType = carrierChallenge.app_type
-    val authType = carrierChallenge.auth_type
+    val telephonyManager = context.getSystemService<TelephonyManager>()
+        ?: return failure(
+            CarrierIdError.CARRIER_ID_ERROR_NOT_SUPPORTED,
+            "TelephonyManager unavailable"
+        )
+    val targetManager =
+        telephonyManager.createForSubscriptionId(subId)
+    if (challengeData.startsWith("[ts43]")) {
+        // Not supported for now, try to get the server to dispatch something different
+        return failure(
+            CarrierIdError.CARRIER_ID_ERROR_NOT_SUPPORTED,
+            "TS43-prefixed Carrier ID challenge not supported"
+        )
+    }
+
+    val appType = carrierChallenge.app_type.takeIf { it != 0 } ?: TelephonyManager.APPTYPE_USIM
 
     return try {
-        val telephonyManager = context.getSystemService<TelephonyManager>()
-            ?: return failure(
-                CarrierIdError.CARRIER_ID_ERROR_NOT_SUPPORTED,
-                "TelephonyManager unavailable"
-            )
-        val targetManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            telephonyManager.createForSubscriptionId(subId)
-        } else {
-            telephonyManager
-        }
-
-        val response = targetManager.getIccAuthentication(appType, authType, challengeData)
+        val response = targetManager.getIccAuthentication(appType, carrierChallenge.auth_type, challengeData)
         if (response.isNullOrEmpty()) {
             failure(CarrierIdError.CARRIER_ID_ERROR_NULL_RESPONSE, "Null ISIM response")
         } else {
@@ -75,6 +88,13 @@ fun Challenge.verifyCarrierId(context: Context, subId: Int): ChallengeResponse {
             e.message ?: "Reflection or platform error"
         )
     }
+}
+
+fun retryExceededCarrierId(): ChallengeResponse {
+    return failure(
+        CarrierIdError.CARRIER_ID_ERROR_RETRY_ATTEMPT_EXCEEDED,
+        "Carrier ID retry attempt exceeded"
+    )
 }
 
 private fun failure(status: CarrierIdError, message: String): ChallengeResponse {
