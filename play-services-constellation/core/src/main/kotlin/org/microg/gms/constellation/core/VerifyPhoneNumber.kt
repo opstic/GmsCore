@@ -21,6 +21,12 @@ import com.squareup.wire.GrpcStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.microg.gms.common.Constants
+import org.microg.gms.constellation.core.proto.AsterismClient
+import org.microg.gms.constellation.core.proto.Consent
+import org.microg.gms.constellation.core.proto.DeviceID
+import org.microg.gms.constellation.core.proto.GetConsentRequest
+import org.microg.gms.constellation.core.proto.GetConsentResponse
+import org.microg.gms.constellation.core.proto.RequestHeader
 import org.microg.gms.constellation.core.proto.SyncRequest
 import org.microg.gms.constellation.core.proto.Verification
 import org.microg.gms.constellation.core.proto.builder.RequestBuildContext
@@ -202,10 +208,11 @@ private suspend fun handleVerifyPhoneNumberRequest(
         }
     } catch (e: Exception) {
         Log.e(TAG, "verifyPhoneNumber failed", e)
-        val status = if (readCallbackMode == ReadCallbackMode.NONE && e is GrpcException) {
-            handleRpcError(e)
-        } else {
-            Status.INTERNAL_ERROR
+        val status = when {
+            readCallbackMode != ReadCallbackMode.NONE -> Status.INTERNAL_ERROR
+            e is GrpcException -> handleRpcError(e)
+            e is NoConsentException -> Status(5001)
+            else -> Status.INTERNAL_ERROR
         }
         when (readCallbackMode) {
             ReadCallbackMode.LEGACY -> {
@@ -256,6 +263,8 @@ private fun handleRpcError(error: GrpcException): Status {
     return Status(statusCode, error.message)
 }
 
+private class NoConsentException : Exception("No consent")
+
 private suspend fun runVerificationFlow(
     context: Context,
     request: VerifyPhoneNumberRequest,
@@ -267,6 +276,34 @@ private suspend fun runVerificationFlow(
 
     val imsiToInfoMap = buildImsiToSubscriptionInfoMap(context)
     val buildContext = buildRequestContext(context)
+
+    val asterismClient = when (request.extras.getString("required_consumer_consent")) {
+        "RCS" -> AsterismClient.RCS
+        else -> AsterismClient.UNKNOWN_CLIENT
+    }
+
+    if (
+        request.extras.getString("one_time_verification") != "True" &&
+        asterismClient != AsterismClient.UNKNOWN_CLIENT
+    ) {
+        val consent = getConsent(
+            context,
+            buildContext,
+            asterismClient,
+            sessionId,
+        )
+
+        val consented = consent.rcs_consent?.consent == Consent.CONSENTED ||
+                consent.gaia_consents.any {
+                    it.asterism_client == asterismClient && it.consent == Consent.CONSENTED
+                }
+
+        if (!consented) {
+            Log.e(TAG, "Consent has not been set. Not running verification.")
+            throw NoConsentException()
+        }
+    }
+
     val syncRequest = SyncRequest(
         context,
         sessionId,
@@ -394,4 +431,37 @@ private suspend fun executeSyncFlow(
     }
 
     verifications
+}
+
+suspend fun getConsent(
+    context: Context,
+    buildContext: RequestBuildContext,
+    asterismClient: AsterismClient,
+    sessionId: String = UUID.randomUUID().toString()
+): GetConsentResponse {
+    val request = GetConsentRequest(
+        device_id = DeviceID(context, buildContext.iidToken),
+        header_ = RequestHeader(
+            context,
+            sessionId,
+            buildContext,
+            "getConsent"
+        ),
+        asterism_client = asterismClient
+    )
+
+    return try {
+        RpcClient.phoneDeviceVerificationClient.GetConsent().execute(request)
+    } catch (e: GrpcException) {
+        if (e.grpcStatus == GrpcStatus.PERMISSION_DENIED ||
+            e.grpcStatus == GrpcStatus.UNAUTHENTICATED
+        ) {
+            Log.w(
+                TAG,
+                "Suspicious client status ${e.grpcStatus.name}. Clearing DroidGuard cache..."
+            )
+            ConstellationStateStore.clearDroidGuardToken(context)
+        }
+        throw e
+    }
 }
