@@ -755,15 +755,13 @@ message GetConsentResponse {
   PermissionState permission_state = 10;
 }
 
-enum FlowContext {
-  option allow_alias = true;
-  FLOW_CONTEXT_UNSPECIFIED = 0;
-  FLOW_CONTEXT_RCS_DEFAULT_ON_LEGAL_FYI = 0;
-  FLOW_CONTEXT_RCS_CONSENT = 1;
-  FLOW_CONTEXT_RCS_DEFAULT_ON_OUT_OF_BOX = 2;
-  FLOW_CONTEXT_RCS_SAMSUNG_UNFREEZE = 3;
-  FLOW_CONTEXT_RCS_DEFAULT_ON_LEGAL_FYI_IN_SETTINGS = 4;
-  FLOW_CONTEXT_RCS_UNKNOWN_5 = 5;
+enum ConsentVersion {
+  CONSENT_VERSION_UNSPECIFIED = 0;
+  RCS_CONSENT = 1;
+  RCS_DEFAULT_ON_LEGAL_FYI = 2;
+  RCS_DEFAULT_ON_OUT_OF_BOX = 3;
+  RCS_SAMSUNG_UNFREEZE = 4;
+  RCS_DEFAULT_ON_LEGAL_FYI_IN_SETTINGS = 5;
 }
 
 message SetConsentRequest {
@@ -773,7 +771,7 @@ message SetConsentRequest {
   bytes audit_record = 6;
   repeated Param api_params = 7;
   OnDemandConsent on_demand_consent = 8;
-  FlowContext flow_context = 9;
+  ConsentVersion consent_version = 9;
   oneof device_consent_oneof {
     AsterismConsent device_consent = 10;
   }
@@ -789,22 +787,18 @@ enum Consent {
   EXPIRED = 3;
 }
 
-enum ConsentVersion {
-  option allow_alias = true;
-  CONSENT_VERSION_UNSPECIFIED = 0;
-  RCS_LEGAL_FYI = 0;
-  RCS_CONSENT = 1;
-  RCS_OUT_OF_BOX = 2;
-  PHONE_VERIFICATION_DEFAULT = 1;
-  PHONE_VERIFICATION_MESSAGES_CALLS_V1 = 2;
-  PHONE_VERIFICATION_INTL_SMS_CALLS = 3;
-  PHONE_VERIFICATION_REACHABILITY_INTL_SMS_CALLS = 4;
-}
-
 message AsterismConsent {
   Consent consent = 1;
   ConsentSource consent_source = 2;
-  ConsentVersion consent_version = 3;
+  DeviceConsentVersion consent_version = 3;
+
+  enum DeviceConsentVersion {
+    UNKNOWN = 0;
+    PHONE_VERIFICATION_DEFAULT = 1;
+    PHONE_VERIFICATION_MESSAGES_CALLS_V1 = 2;
+    PHONE_VERIFICATION_INTL_SMS_CALLS = 3;
+    PHONE_VERIFICATION_REACHABILITY_INTL_SMS_CALLS = 4;
+  }
 }
 
 message ConsentState {

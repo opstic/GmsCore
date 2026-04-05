@@ -10,9 +10,9 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import com.squareup.wire.Instant
 import okio.ByteString.Companion.toByteString
+import org.microg.gms.constellation.core.proto.AsterismConsent.DeviceConsentVersion
 import org.microg.gms.constellation.core.proto.Consent
 import org.microg.gms.constellation.core.proto.ConsentSource
-import org.microg.gms.constellation.core.proto.ConsentVersion
 import org.microg.gms.constellation.core.proto.DroidguardToken
 import org.microg.gms.constellation.core.proto.ProceedResponse
 import org.microg.gms.constellation.core.proto.ServerTimestamp
@@ -132,7 +132,7 @@ object ConstellationStateStore {
         context: Context,
         consent: Consent,
         source: ConsentSource,
-        version: ConsentVersion
+        version: DeviceConsentVersion
     ) {
         statePrefs(context).edit {
             putInt(KEY_PNVR_NOTICE_CONSENT, consent.value)
