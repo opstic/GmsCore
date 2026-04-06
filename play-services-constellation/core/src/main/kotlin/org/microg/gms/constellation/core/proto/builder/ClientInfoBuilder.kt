@@ -5,6 +5,8 @@ package org.microg.gms.constellation.core.proto.builder
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
+import android.os.Process
+import android.os.UserManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import android.util.Base64
@@ -83,15 +85,15 @@ operator fun DeviceID.Companion.invoke(context: Context, iidToken: String): Devi
     }
 
     val userSerial = try {
-        val userManager = context.getSystemService<android.os.UserManager>()
-        userManager?.getSerialNumberForUser(android.os.Process.myUserHandle()) ?: 0L
+        val userManager = context.getSystemService<UserManager>()
+        userManager?.getSerialNumberForUser(Process.myUserHandle()) ?: 0L
     } catch (_: Exception) {
         0L
     }
 
     var primaryDeviceId = prefs.getLong("primary_device_id", 0L)
     val isSystemUser = try {
-        val userManager = context.getSystemService<android.os.UserManager>()
+        val userManager = context.getSystemService<UserManager>()
         userManager?.isSystemUser ?: true
     } catch (_: Exception) {
         true

@@ -142,20 +142,12 @@ private suspend fun MoChallenge.sendOnce(context: Context, subId: Int): Challeng
                 }
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(
-                    receiver,
-                    IntentFilter(action),
-                    Context.RECEIVER_NOT_EXPORTED
-                )
-            } else {
-                ContextCompat.registerReceiver(
-                    context,
-                    receiver,
-                    IntentFilter(action),
-                    ContextCompat.RECEIVER_NOT_EXPORTED
-                )
-            }
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                IntentFilter(action),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
 
             continuation.invokeOnCancellation {
                 try {
@@ -252,7 +244,7 @@ private fun resolveSmsManager(context: Context, subId: Int): SmsManager? {
 
     return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val manager = context.getSystemService(SmsManager::class.java)
+            val manager = context.getSystemService<SmsManager>()
             if (subId != -1) {
                 manager?.createForSubscriptionId(subId)
             } else {

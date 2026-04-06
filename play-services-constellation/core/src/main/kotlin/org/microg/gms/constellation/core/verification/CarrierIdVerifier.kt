@@ -58,7 +58,8 @@ fun Challenge.verifyCarrierId(context: Context, subId: Int): ChallengeResponse {
     val appType = carrierChallenge.app_type.takeIf { it != 0 } ?: TelephonyManager.APPTYPE_USIM
 
     return try {
-        val response = targetManager.getIccAuthentication(appType, carrierChallenge.auth_type, challengeData)
+        val response =
+            targetManager.getIccAuthentication(appType, carrierChallenge.auth_type, challengeData)
         if (response.isNullOrEmpty()) {
             failure(CarrierIdError.CARRIER_ID_ERROR_NULL_RESPONSE, "Null ISIM response")
         } else {
