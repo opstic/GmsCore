@@ -29,8 +29,8 @@ object RpcClient {
         .build()
 
     val phoneDeviceVerificationClient: PhoneDeviceVerificationClient =
-        grpcClient.create(PhoneDeviceVerificationClient::class)
+        grpcClient.create<PhoneDeviceVerificationClient>()
 
     val phoneNumberClient: PhoneNumberClient =
-        grpcClient.create(PhoneNumberClient::class)
+        grpcClient.create<PhoneNumberClient>()
 }
