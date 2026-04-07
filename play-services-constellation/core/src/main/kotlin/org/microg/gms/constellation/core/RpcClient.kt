@@ -1,13 +1,16 @@
 package org.microg.gms.constellation.core
 
+import com.squareup.wire.Duration
 import com.squareup.wire.GrpcClient
 import okhttp3.OkHttpClient
 import org.microg.gms.common.Constants
 import org.microg.gms.constellation.core.proto.PhoneDeviceVerificationClient
 import org.microg.gms.constellation.core.proto.PhoneNumberClient
+import java.util.concurrent.TimeUnit
 
 object RpcClient {
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(60, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val originalRequest = chain.request()
             val builder = originalRequest.newBuilder()
