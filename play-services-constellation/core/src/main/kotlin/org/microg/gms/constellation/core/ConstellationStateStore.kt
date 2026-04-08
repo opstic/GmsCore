@@ -90,18 +90,6 @@ object ConstellationStateStore {
         return null
     }
 
-    private fun storeCachedDroidGuardToken(
-        context: Context,
-        token: String,
-        expirationMillis: Long
-    ) {
-        if (token.isBlank() || expirationMillis <= System.currentTimeMillis()) return
-        statePrefs(context).edit {
-            putString(KEY_DROIDGUARD_TOKEN, token)
-            putLong(KEY_DROIDGUARD_TOKEN_TTL, expirationMillis)
-        }
-    }
-
     fun clearDroidGuardToken(context: Context) {
         statePrefs(context).edit {
             remove(KEY_DROIDGUARD_TOKEN)
@@ -160,21 +148,23 @@ object ConstellationStateStore {
     private fun storeDroidGuardToken(context: Context, token: DroidguardToken?) {
         val tokenValue = token?.token?.takeIf { it.isNotEmpty() } ?: return
         val expiration = token.ttl?.toEpochMilli() ?: return
-        storeCachedDroidGuardToken(context, tokenValue, expiration)
-    }
-
-    private fun storeNextSyncTime(context: Context, timestamp: ServerTimestamp?) {
-        val nextSyncDelayMillis = timestamp?.let(::nextSyncDelayMillis) ?: return
+        if (tokenValue.isBlank() || expiration <= System.currentTimeMillis()) return
         statePrefs(context).edit {
-            // GMS stores the next sync deadline as an absolute wall-clock timestamp
-            putLong(KEY_NEXT_SYNC_TIMESTAMP_MS, System.currentTimeMillis() + nextSyncDelayMillis)
+            putString(KEY_DROIDGUARD_TOKEN, tokenValue)
+            putLong(KEY_DROIDGUARD_TOKEN_TTL, expiration)
         }
     }
 
-    private fun nextSyncDelayMillis(timestamp: ServerTimestamp): Long {
-        val serverMillis = timestamp.timestamp?.toEpochMilli() ?: 0L
-        val localMillis = timestamp.now?.toEpochMilli() ?: 0L
-        return serverMillis - localMillis
+    private fun storeNextSyncTime(context: Context, timestamp: ServerTimestamp?) {
+        val serverMillis = timestamp?.timestamp?.toEpochMilli() ?: return
+        val localMillis = timestamp.now?.toEpochMilli() ?: return
+        statePrefs(context).edit {
+            // GMS stores the next sync deadline as an absolute wall-clock timestamp
+            putLong(
+                KEY_NEXT_SYNC_TIMESTAMP_MS,
+                System.currentTimeMillis() + serverMillis - localMillis
+            )
+        }
     }
 
     private fun statePrefs(context: Context) =

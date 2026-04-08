@@ -5,9 +5,11 @@ import okhttp3.OkHttpClient
 import org.microg.gms.common.Constants
 import org.microg.gms.constellation.core.proto.PhoneDeviceVerificationClient
 import org.microg.gms.constellation.core.proto.PhoneNumberClient
+import java.util.concurrent.TimeUnit
 
 object RpcClient {
     private val client: OkHttpClient = OkHttpClient.Builder()
+        .callTimeout(60, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val originalRequest = chain.request()
             val builder = originalRequest.newBuilder()
@@ -26,8 +28,8 @@ object RpcClient {
         .build()
 
     val phoneDeviceVerificationClient: PhoneDeviceVerificationClient =
-        grpcClient.create(PhoneDeviceVerificationClient::class)
+        grpcClient.create<PhoneDeviceVerificationClient>()
 
     val phoneNumberClient: PhoneNumberClient =
-        grpcClient.create(PhoneNumberClient::class)
+        grpcClient.create<PhoneNumberClient>()
 }

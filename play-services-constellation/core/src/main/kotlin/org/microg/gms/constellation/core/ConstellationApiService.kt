@@ -78,7 +78,14 @@ class ConstellationApiServiceImpl(
         )
         if (cb == null || bundle == null) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        serviceScope.launch { handleVerifyPhoneNumberV1(context, cb, bundle, packageName) }
+        serviceScope.launch {
+            handleVerifyPhoneNumberV1(
+                context,
+                ConstellationCallbacksWrapper(cb),
+                bundle,
+                packageName
+            )
+        }
     }
 
     override fun verifyPhoneNumberSingleUse(
@@ -89,7 +96,14 @@ class ConstellationApiServiceImpl(
         Log.i(TAG, "verifyPhoneNumberSingleUse()")
         if (cb == null || bundle == null) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        serviceScope.launch { handleVerifyPhoneNumberSingleUse(context, cb, bundle, packageName) }
+        serviceScope.launch {
+            handleVerifyPhoneNumberSingleUse(
+                context,
+                ConstellationCallbacksWrapper(cb),
+                bundle,
+                packageName
+            )
+        }
     }
 
     override fun verifyPhoneNumber(
@@ -103,7 +117,14 @@ class ConstellationApiServiceImpl(
         )
         if (cb == null || request == null) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        serviceScope.launch { handleVerifyPhoneNumberRequest(context, cb, request, packageName) }
+        serviceScope.launch {
+            handleVerifyPhoneNumberRequest(
+                context,
+                ConstellationCallbacksWrapper(cb),
+                request,
+                packageName
+            )
+        }
     }
 
     override fun getIidToken(
@@ -113,7 +134,13 @@ class ConstellationApiServiceImpl(
     ) {
         Log.i(TAG, "getIidToken(): $request")
         if (cb == null || request == null) return
-        serviceScope.launch { handleGetIidToken(context, cb, request) }
+        serviceScope.launch {
+            handleGetIidToken(
+                context,
+                ConstellationCallbacksWrapper(cb),
+                request
+            )
+        }
     }
 
     override fun getPnvCapabilities(
@@ -124,6 +151,12 @@ class ConstellationApiServiceImpl(
         Log.i(TAG, "getPnvCapabilities(): $request")
         if (cb == null || request == null) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return
-        serviceScope.launch { handleGetPnvCapabilities(context, cb, request) }
+        serviceScope.launch {
+            handleGetPnvCapabilities(
+                context,
+                ConstellationCallbacksWrapper(cb),
+                request
+            )
+        }
     }
 }
