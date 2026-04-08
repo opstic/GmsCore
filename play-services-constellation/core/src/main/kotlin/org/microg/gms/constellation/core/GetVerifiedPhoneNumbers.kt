@@ -4,15 +4,10 @@ package org.microg.gms.constellation.core
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import com.google.android.gms.common.api.ApiMetadata
-import com.google.android.gms.common.api.Status
 import com.google.android.gms.constellation.PhoneNumberInfo
-import com.google.android.gms.constellation.VerifyPhoneNumberResponse
 import com.google.android.gms.constellation.VerifyPhoneNumberResponse.PhoneNumberVerification
-import com.google.android.gms.constellation.internal.IConstellationCallbacks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okio.ByteString.Companion.toByteString
@@ -25,25 +20,6 @@ import org.microg.gms.constellation.core.proto.VerifiedPhoneNumber
 import java.util.UUID
 
 private const val TAG = "GetVerifiedPhoneNumbers"
-
-suspend fun handleGetVerifiedPhoneNumbers(
-    context: Context,
-    callbacks: IConstellationCallbacks,
-    bundle: Bundle
-) = withContext(Dispatchers.IO) {
-    try {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            throw Exception("Unsupported SDK")
-        }
-
-        val phoneNumbers = fetchVerifiedPhoneNumbers(context, bundle).map { it.toPhoneNumberInfo() }
-
-        callbacks.onPhoneNumberVerified(Status.SUCCESS, phoneNumbers, ApiMetadata.DEFAULT)
-    } catch (e: Exception) {
-        Log.e(TAG, "Error in GetVerifiedPhoneNumbers (read-only)", e)
-        callbacks.onPhoneNumberVerified(Status.INTERNAL_ERROR, emptyList(), ApiMetadata.DEFAULT)
-    }
-}
 
 internal suspend fun fetchVerifiedPhoneNumbers(
     context: Context,
@@ -87,14 +63,7 @@ internal suspend fun fetchVerifiedPhoneNumbers(
     response.phone_numbers
 }
 
-internal fun List<VerifiedPhoneNumber>.toVerifyPhoneNumberResponse(): VerifyPhoneNumberResponse {
-    return VerifyPhoneNumberResponse(
-        map { it.toPhoneNumberVerification() }.toTypedArray(),
-        Bundle.EMPTY
-    )
-}
-
-private fun VerifiedPhoneNumber.toPhoneNumberInfo(): PhoneNumberInfo {
+internal fun VerifiedPhoneNumber.toPhoneNumberInfo(): PhoneNumberInfo {
     val extras = Bundle().apply {
         if (id_token.isNotEmpty()) {
             putString("id_token", id_token)
@@ -110,7 +79,7 @@ private fun VerifiedPhoneNumber.toPhoneNumberInfo(): PhoneNumberInfo {
     )
 }
 
-private fun VerifiedPhoneNumber.toPhoneNumberVerification(): PhoneNumberVerification {
+internal fun VerifiedPhoneNumber.toPhoneNumberVerification(): PhoneNumberVerification {
     val extras = Bundle().apply {
         putInt("rcs_state", rcs_state.value)
     }

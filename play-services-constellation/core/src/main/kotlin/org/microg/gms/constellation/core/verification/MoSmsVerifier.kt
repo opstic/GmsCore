@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import org.microg.gms.constellation.core.proto.ChallengeResponse
@@ -76,18 +77,21 @@ private suspend fun MoChallenge.sendOnce(context: Context, subId: Int): Challeng
         return failedMoResponse()
     }
 
+    if (subId != -1 && !isActiveSubscription(context, subId)) {
+        return ChallengeResponse(
+            mo_response = MOChallengeResponseData(
+                status = MOChallengeResponseData.Status.NO_ACTIVE_SUBSCRIPTION
+            )
+        )
+    }
+
     val smsManager = resolveSmsManager(context, subId) ?: return ChallengeResponse(
         mo_response = MOChallengeResponseData(
-            status = if (subId != -1 && !isActiveSubscription(context, subId)) {
-                MOChallengeResponseData.Status.NO_ACTIVE_SUBSCRIPTION
-            } else {
-                MOChallengeResponseData.Status.NO_SMS_MANAGER
-            }
+            status = MOChallengeResponseData.Status.NO_SMS_MANAGER
         )
     )
 
     val port = data_sms_info?.destination_port ?: 0
-    val isBinarySms = port > 0
     val action = ACTION_MO_SMS_SENT
     val messageId = UUID.randomUUID().toString()
     val sentIntent = Intent(action).apply {
@@ -104,43 +108,9 @@ private suspend fun MoChallenge.sendOnce(context: Context, subId: Int): Challeng
 
     Log.d(TAG, "Sending MO SMS to $proxy_number with messageId: $messageId")
 
-    return withTimeoutOrNull(30_000L) {
+    val response = withTimeoutOrNull(30_000L) {
         suspendCancellableCoroutine { continuation ->
-            val receiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    if (intent.action == action) {
-                        val receivedId = intent.getStringExtra("message_id")
-                        if (receivedId != messageId) return
-
-                        val resultCode = resultCode
-                        val errorCode = intent.getIntExtra("errorCode", -1)
-
-                        Log.d(TAG, "MO SMS sent result: $resultCode, error: $errorCode")
-
-                        val status = when (resultCode) {
-                            -1 -> MOChallengeResponseData.Status.COMPLETED
-                            else -> MOChallengeResponseData.Status.FAILED_TO_SEND_MO
-                        }
-
-                        try {
-                            context.unregisterReceiver(this)
-                        } catch (_: Exception) {
-                        }
-
-                        if (continuation.isActive) {
-                            continuation.resume(
-                                ChallengeResponse(
-                                    mo_response = MOChallengeResponseData(
-                                        status = status,
-                                        sms_result_code = resultCode.toLong(),
-                                        sms_error_code = errorCode.toLong()
-                                    )
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+            val receiver = MoSmsSentReceiver(action, messageId, continuation)
 
             ContextCompat.registerReceiver(
                 context,
@@ -150,14 +120,11 @@ private suspend fun MoChallenge.sendOnce(context: Context, subId: Int): Challeng
             )
 
             continuation.invokeOnCancellation {
-                try {
-                    context.unregisterReceiver(receiver)
-                } catch (_: Exception) {
-                }
+                runCatching { context.unregisterReceiver(receiver) }
             }
 
             try {
-                if (isBinarySms) {
+                if (port > 0) {
                     smsManager.sendDataMessage(
                         proxy_number,
                         null,
@@ -177,16 +144,46 @@ private suspend fun MoChallenge.sendOnce(context: Context, subId: Int): Challeng
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initiate MO SMS send", e)
-                try {
-                    context.unregisterReceiver(receiver)
-                } catch (_: Exception) {
-                }
+                runCatching { context.unregisterReceiver(receiver) }
                 if (continuation.isActive) {
                     continuation.resume(failedMoResponse())
                 }
             }
         }
-    } ?: failedMoResponse()
+    }
+    return response ?: failedMoResponse()
+}
+
+private class MoSmsSentReceiver(
+    private val action: String,
+    private val messageId: String,
+    private val continuation: CancellableContinuation<ChallengeResponse>
+) : BroadcastReceiver() {
+    override fun onReceive(receiverContext: Context, intent: Intent) {
+        if (intent.action != action) return
+        if (intent.getStringExtra("message_id") != messageId) return
+
+        val smsResultCode = resultCode
+        val smsErrorCode = intent.getIntExtra("errorCode", -1)
+
+        Log.d(TAG, "MO SMS sent result: $smsResultCode, error: $smsErrorCode")
+        runCatching { receiverContext.unregisterReceiver(this) }
+        if (!continuation.isActive) return
+
+        continuation.resume(
+            ChallengeResponse(
+                mo_response = MOChallengeResponseData(
+                    status = if (smsResultCode == -1) {
+                        MOChallengeResponseData.Status.COMPLETED
+                    } else {
+                        MOChallengeResponseData.Status.FAILED_TO_SEND_MO
+                    },
+                    sms_result_code = smsResultCode.toLong(),
+                    sms_error_code = smsErrorCode.toLong()
+                )
+            )
+        )
+    }
 }
 
 private fun MoChallenge.pollingIntervalsMillis(): List<Long> {
@@ -238,10 +235,6 @@ private fun isActiveSubscription(context: Context, subId: Int): Boolean {
 
 @Suppress("DEPRECATION")
 private fun resolveSmsManager(context: Context, subId: Int): SmsManager? {
-    if (subId != -1 && !isActiveSubscription(context, subId)) {
-        return null
-    }
-
     return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             val manager = context.getSystemService<SmsManager>()

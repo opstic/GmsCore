@@ -87,51 +87,49 @@ object ChallengeProcessor {
             if (challenge.type != VerificationMethod.MO_SMS) {
                 moSession = null
             }
-            if (challenge.type != VerificationMethod.CARRIER_ID || challenge.ts43_challenge != null) {
+            if (challenge.type == VerificationMethod.CARRIER_ID && challenge.ts43_challenge == null) {
+                carrierIdSession = carrierIdSession?.takeIf { it.matches(challengeId, subId) }
+                    ?: CarrierIdSession(challengeId, subId)
+            } else {
                 carrierIdSession = null
             }
 
             val challengeResponse: ChallengeResponse? = when (challenge.type) {
                 VerificationMethod.TS43 -> challenge.ts43_challenge?.verify(context, subId)
 
-                VerificationMethod.CARRIER_ID -> {
-                    if (challenge.ts43_challenge != null) {
-                        challenge.ts43_challenge.verify(context, subId)
+                VerificationMethod.CARRIER_ID -> if (challenge.ts43_challenge != null)
+                    challenge.ts43_challenge.verify(context, subId)
+                else {
+                    carrierIdSession!!.attempts += 1
+
+                    if (carrierIdSession!!.attempts >= 4) {
+                        Log.w(
+                            TAG,
+                            "Attempt $attempt: Carrier ID challenge $challengeId is still pending after retry-exceeded response. Stopping."
+                        )
+                        return currentVerification
+                    }
+
+                    if (carrierIdSession.attempts >= 3) {
+                        Log.w(
+                            TAG,
+                            "Attempt $attempt: Carrier ID challenge $challengeId exceeded retry budget. Proceeding with retry-exceeded response."
+                        )
+                        retryExceededCarrierId()
                     } else {
-                        val activeSession =
-                            carrierIdSession?.takeIf { it.matches(challengeId, subId) }
-                                ?: CarrierIdSession(challengeId, subId).also {
-                                    carrierIdSession = it
-                                }
-
-                        activeSession.attempts += 1
-
-                        if (activeSession.attempts >= 4) {
-                            Log.w(
-                                TAG,
-                                "Attempt $attempt: Carrier ID challenge $challengeId is still pending after retry-exceeded response. Stopping."
-                            )
-                            return currentVerification
-                        }
-
-                        if (activeSession.attempts >= 3) {
-                            Log.w(
-                                TAG,
-                                "Attempt $attempt: Carrier ID challenge $challengeId exceeded retry budget. Proceeding with retry-exceeded response."
-                            )
-                            retryExceededCarrierId()
-                        } else {
-                            challenge.verifyCarrierId(context, subId)
-                        }
+                        challenge.verifyCarrierId(context, subId)
                     }
                 }
 
                 VerificationMethod.MT_SMS -> challenge.mt_challenge?.verify(subId, remainingMillis)
 
                 VerificationMethod.MO_SMS -> challenge.mo_challenge?.let { moChallenge ->
-                    val activeSession = moSession?.takeIf { it.matches(challengeId, subId) }
-                    if (activeSession != null) {
-                        val delayMillis = activeSession.nextPollingDelayMillis(remainingMillis)
+                    if (moSession?.matches(challengeId, subId) != true) {
+                        moChallenge.startSession(context, challengeId, subId).also {
+                            moSession = it
+                        }.response
+                    } else {
+                        val delayMillis = moSession!!.nextPollingDelayMillis(remainingMillis)
                         if (delayMillis > 0L) {
                             Log.d(
                                 TAG,
@@ -139,11 +137,7 @@ object ChallengeProcessor {
                             )
                             delay(delayMillis)
                         }
-                        activeSession.response
-                    } else {
-                        moChallenge.startSession(context, challengeId, subId).also {
-                            moSession = it
-                        }.response
+                        moSession!!.response
                     }
                 }
 
@@ -153,61 +147,60 @@ object ChallengeProcessor {
                 )
 
                 else -> {
-                    moSession = null
                     Log.w(TAG, "Unsupported verification method: ${challenge.type}")
                     null
                 }
             }
 
-            if (challengeResponse != null) {
-                Log.d(TAG, "Attempt $attempt: Challenge successfully solved. Proceeding...")
-                val proceedHeader = RequestHeader(
-                    context,
-                    sessionId,
-                    buildContext,
-                    "proceed",
-                    includeClientAuth = true,
-                )
-                val proceedRequest = ProceedRequest(
-                    verification = currentVerification,
-                    challenge_response = challengeResponse,
-                    header_ = proceedHeader
-                )
-                val proceedResponse = try {
-                    RpcClient.phoneDeviceVerificationClient.Proceed().execute(proceedRequest)
-                } catch (e: GrpcException) {
-                    if (e.grpcStatus == GrpcStatus.PERMISSION_DENIED ||
-                        e.grpcStatus == GrpcStatus.UNAUTHENTICATED
-                    ) {
-                        Log.w(
-                            TAG,
-                            "Suspicious client status ${e.grpcStatus.name}. Clearing DroidGuard cache..."
-                        )
-                        ConstellationStateStore.clearDroidGuardToken(context)
-                    }
-                    throw e
-                }
-                ConstellationStateStore.storeProceedResponse(context, proceedResponse)
-                currentVerification = proceedResponse.verification ?: currentVerification
-
-                if (challenge.type == VerificationMethod.CARRIER_ID) {
-                    val nextChallenge = currentVerification.pending_verification_info?.challenge
-                    val sameCarrierIdChallenge =
-                        nextChallenge?.type == VerificationMethod.CARRIER_ID &&
-                                nextChallenge.challenge_id?.id == challengeId &&
-                                nextChallenge.ts43_challenge == null
-
-                    if (!sameCarrierIdChallenge) {
-                        carrierIdSession = null
-                    }
-                }
-            } else {
+            if (challengeResponse == null) {
                 Log.w(
                     TAG,
                     "Attempt $attempt: Challenge verification failed or returned no response."
                 )
                 // GMS continues looping if IMSI doesn't match or other issues, but here we return to avoid infinite retries if verifier is broken
                 return currentVerification
+            }
+
+            Log.d(TAG, "Attempt $attempt: Challenge successfully solved. Proceeding...")
+            val proceedHeader = RequestHeader(
+                context,
+                sessionId,
+                buildContext,
+                "proceed",
+                includeClientAuth = true,
+            )
+            val proceedRequest = ProceedRequest(
+                verification = currentVerification,
+                challenge_response = challengeResponse,
+                header_ = proceedHeader
+            )
+            val proceedResponse = try {
+                RpcClient.phoneDeviceVerificationClient.Proceed().execute(proceedRequest)
+            } catch (e: GrpcException) {
+                if (e.grpcStatus == GrpcStatus.PERMISSION_DENIED ||
+                    e.grpcStatus == GrpcStatus.UNAUTHENTICATED
+                ) {
+                    Log.w(
+                        TAG,
+                        "Suspicious client status ${e.grpcStatus.name}. Clearing DroidGuard cache..."
+                    )
+                    ConstellationStateStore.clearDroidGuardToken(context)
+                }
+                throw e
+            }
+            ConstellationStateStore.storeProceedResponse(context, proceedResponse)
+            currentVerification = proceedResponse.verification ?: currentVerification
+
+            if (challenge.type == VerificationMethod.CARRIER_ID && challenge.ts43_challenge == null) {
+                val nextChallenge = currentVerification.pending_verification_info?.challenge
+                val sameCarrierIdChallenge =
+                    nextChallenge?.type == VerificationMethod.CARRIER_ID &&
+                            nextChallenge.challenge_id?.id == challengeId &&
+                            nextChallenge.ts43_challenge == null
+
+                if (!sameCarrierIdChallenge) {
+                    carrierIdSession = null
+                }
             }
         }
 

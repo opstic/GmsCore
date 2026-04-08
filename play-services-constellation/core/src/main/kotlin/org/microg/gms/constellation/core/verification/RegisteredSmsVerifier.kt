@@ -116,7 +116,6 @@ private fun getLocalNumbers(context: Context, targetSubId: Int): List<String> {
         context,
         Manifest.permission.READ_PHONE_STATE
     ) == PackageManager.PERMISSION_GRANTED
-    val isCarrier = telephonyManager?.hasCarrierPrivileges() == true
     val hasNumbers = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         ContextCompat.checkSelfPermission(
             context,
@@ -126,7 +125,7 @@ private fun getLocalNumbers(context: Context, targetSubId: Int): List<String> {
         hasState
     }
 
-    if (!isCarrier && (!hasState || !hasNumbers)) {
+    if (telephonyManager?.hasCarrierPrivileges() != true && (!hasState || !hasNumbers)) {
         Log.e(TAG, "Permission not granted")
         return emptyList()
     }

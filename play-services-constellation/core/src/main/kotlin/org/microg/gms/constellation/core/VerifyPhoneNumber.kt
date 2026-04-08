@@ -173,11 +173,15 @@ private suspend fun handleVerifyPhoneNumberRequest(
     localReadFallback: Boolean = false,
     legacyCallbackOnFullFlow: Boolean = false
 ) {
-    try {
+    var phoneNumbers = emptyList<PhoneNumberInfo>()
+    var verifications = emptyArray<PhoneNumberVerification>()
+    val status = try {
         when (readCallbackMode) {
             ReadCallbackMode.LEGACY -> {
                 Log.d(TAG, "Using read-only mode")
-                handleGetVerifiedPhoneNumbers(context, callbacks, request.extras)
+                phoneNumbers = fetchVerifiedPhoneNumbers(context, request.extras)
+                    .map { it.toPhoneNumberInfo() }
+                Status.SUCCESS
             }
 
             ReadCallbackMode.TYPED -> {
@@ -186,68 +190,46 @@ private suspend fun handleVerifyPhoneNumberRequest(
                 } else {
                     Log.d(TAG, "Using typed read-only mode")
                 }
-                val response = fetchVerifiedPhoneNumbers(context, request.extras, callingPackage)
-                    .toVerifyPhoneNumberResponse()
-                callbacks.onPhoneNumberVerificationsCompleted(
-                    Status.SUCCESS,
-                    response,
-                    ApiMetadata.DEFAULT
-                )
+                verifications = fetchVerifiedPhoneNumbers(context, request.extras, callingPackage)
+                    .map { it.toPhoneNumberVerification() }
+                    .toTypedArray()
+                Status.SUCCESS
             }
 
             ReadCallbackMode.NONE -> {
                 Log.d(TAG, "Using full verification mode")
-                runVerificationFlow(
-                    context,
-                    request,
-                    callingPackage,
-                    callbacks,
-                    legacyCallback = legacyCallbackOnFullFlow
-                )
+                verifications = runVerificationFlow(context, request, callingPackage)
+                Status.SUCCESS
             }
         }
     } catch (e: Exception) {
         Log.e(TAG, "verifyPhoneNumber failed", e)
-        val status = when {
+        when {
             readCallbackMode != ReadCallbackMode.NONE -> Status.INTERNAL_ERROR
             e is GrpcException -> handleRpcError(e)
             e is NoConsentException -> Status(5001)
             else -> Status.INTERNAL_ERROR
         }
-        when (readCallbackMode) {
-            ReadCallbackMode.LEGACY -> {
-                callbacks.onPhoneNumberVerified(
-                    status,
-                    emptyList(),
-                    ApiMetadata.DEFAULT
-                )
-            }
-
-            ReadCallbackMode.NONE -> {
-                if (legacyCallbackOnFullFlow) {
-                    callbacks.onPhoneNumberVerified(
-                        status,
-                        emptyList(),
-                        ApiMetadata.DEFAULT
-                    )
-                } else {
-                    callbacks.onPhoneNumberVerificationsCompleted(
-                        status,
-                        VerifyPhoneNumberResponse(emptyArray(), Bundle()),
-                        ApiMetadata.DEFAULT
-                    )
-                }
-            }
-
-            ReadCallbackMode.TYPED -> {
-                callbacks.onPhoneNumberVerificationsCompleted(
-                    status,
-                    VerifyPhoneNumberResponse(emptyArray(), Bundle()),
-                    ApiMetadata.DEFAULT
-                )
-            }
-        }
     }
+
+    if (readCallbackMode == ReadCallbackMode.LEGACY ||
+        readCallbackMode == ReadCallbackMode.NONE && legacyCallbackOnFullFlow
+    ) {
+        if (readCallbackMode != ReadCallbackMode.LEGACY) {
+            phoneNumbers = verifications.mapNotNull { it.toLegacyPhoneNumberInfoOrNull() }
+        }
+        callbacks.onPhoneNumberVerified(status, phoneNumbers, ApiMetadata.DEFAULT)
+        return
+    }
+
+    callbacks.onPhoneNumberVerificationsCompleted(
+        status,
+        VerifyPhoneNumberResponse(
+            verifications,
+            Bundle()
+        ),
+        ApiMetadata.DEFAULT
+    )
 }
 
 private fun handleRpcError(error: GrpcException): Status {
@@ -268,10 +250,8 @@ private class NoConsentException : Exception("No consent")
 private suspend fun runVerificationFlow(
     context: Context,
     request: VerifyPhoneNumberRequest,
-    callingPackage: String,
-    callbacks: IConstellationCallbacks,
-    legacyCallback: Boolean
-) {
+    callingPackage: String
+): Array<PhoneNumberVerification> {
     val sessionId = UUID.randomUUID().toString()
 
     val imsiToInfoMap = buildImsiToSubscriptionInfoMap(context)
@@ -281,7 +261,6 @@ private suspend fun runVerificationFlow(
         "RCS" -> AsterismClient.RCS
         else -> AsterismClient.UNKNOWN_CLIENT
     }
-
     if (
         request.extras.getString("one_time_verification") != "True" &&
         asterismClient != AsterismClient.UNKNOWN_CLIENT
@@ -331,19 +310,7 @@ private suspend fun runVerificationFlow(
         MtSmsInboxRegistry.dispose()
     }
 
-    if (legacyCallback) {
-        callbacks.onPhoneNumberVerified(
-            Status.SUCCESS,
-            verifications.mapNotNull { it.toLegacyPhoneNumberInfoOrNull() },
-            ApiMetadata.DEFAULT
-        )
-    } else {
-        callbacks.onPhoneNumberVerificationsCompleted(
-            Status.SUCCESS,
-            VerifyPhoneNumberResponse(verifications, Bundle()),
-            ApiMetadata.DEFAULT
-        )
-    }
+    return verifications
 }
 
 private fun PhoneNumberVerification.toLegacyPhoneNumberInfoOrNull(): PhoneNumberInfo? {

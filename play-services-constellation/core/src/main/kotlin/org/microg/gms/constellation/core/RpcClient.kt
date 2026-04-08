@@ -1,6 +1,5 @@
 package org.microg.gms.constellation.core
 
-import com.squareup.wire.Duration
 import com.squareup.wire.GrpcClient
 import okhttp3.OkHttpClient
 import org.microg.gms.common.Constants
