@@ -38,6 +38,18 @@ import org.microg.gms.constellation.core.proto.VerificationPolicy
 
 private const val TAG = "SyncRequestBuilder"
 
+private fun formatSimReadableNumber(
+    number: String?,
+    fallbackNumber: String?,
+    countryIso: String?
+): String {
+    val rawPhoneNumber = number?.takeIf { it.isNotBlank() }
+        ?: fallbackNumber?.takeIf { it.isNotBlank() }
+        ?: return ""
+
+    return PhoneNumberUtils.formatNumberToE164(rawPhoneNumber, countryIso) ?: rawPhoneNumber
+}
+
 fun buildImsiToSubscriptionInfoMap(context: Context): Map<String, SubscriptionInfo> {
     val subscriptionManager =
         context.getSystemService<SubscriptionManager>() ?: return emptyMap()
@@ -143,8 +155,13 @@ suspend operator fun SyncRequest.Companion.invoke(
 ): SyncRequest {
     val apiParamsList = Param.getList(request.extras)
 
-    val verificationParams = request.targetedSims.map {
-        VerificationParam(key = it.imsi, value_ = it.phoneNumberHint)
+    val targetedSims = request.targetedSims.orEmpty()
+    val phoneNumberHintsByImsi = targetedSims
+        .filter { !it.imsi.isNullOrBlank() && !it.phoneNumberHint.isNullOrBlank() }
+        .associate { it.imsi to it.phoneNumberHint }
+
+    val verificationParams = targetedSims.map {
+        VerificationParam(key = it.imsi.orEmpty(), value_ = it.phoneNumberHint.orEmpty())
     }
 
     val structuredParams = VerificationPolicy(
@@ -161,7 +178,11 @@ suspend operator fun SyncRequest.Companion.invoke(
     val verifications = imsiToInfoMap.map { (imsi, subscriptionInfo) ->
         val subscriptionId = subscriptionInfo.subscriptionId
         val slotIndex = subscriptionInfo.simSlotIndex
-        val phoneNumber = PhoneNumberUtils.formatNumberToE164(subscriptionInfo.number, subscriptionInfo.countryIso) ?: ""
+        val phoneNumber = formatSimReadableNumber(
+            subscriptionInfo.number,
+            phoneNumberHintsByImsi[imsi],
+            subscriptionInfo.countryIso
+        )
         val iccid = subscriptionInfo.iccId ?: ""
 
         Verification(
