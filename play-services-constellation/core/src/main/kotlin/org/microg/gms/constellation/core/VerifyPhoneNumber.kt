@@ -23,15 +23,20 @@ import kotlinx.coroutines.withContext
 import org.microg.gms.common.Constants
 import org.microg.gms.constellation.core.proto.AsterismClient
 import org.microg.gms.constellation.core.proto.Consent
+import org.microg.gms.constellation.core.proto.ConsentVersion
 import org.microg.gms.constellation.core.proto.DeviceID
 import org.microg.gms.constellation.core.proto.GetConsentRequest
 import org.microg.gms.constellation.core.proto.GetConsentResponse
+import org.microg.gms.constellation.core.proto.Param
+import org.microg.gms.constellation.core.proto.RcsConsent
 import org.microg.gms.constellation.core.proto.RequestHeader
+import org.microg.gms.constellation.core.proto.SetConsentRequest
 import org.microg.gms.constellation.core.proto.SyncRequest
 import org.microg.gms.constellation.core.proto.Verification
 import org.microg.gms.constellation.core.proto.builder.RequestBuildContext
 import org.microg.gms.constellation.core.proto.builder.buildImsiToSubscriptionInfoMap
 import org.microg.gms.constellation.core.proto.builder.buildRequestContext
+import org.microg.gms.constellation.core.proto.builder.getList
 import org.microg.gms.constellation.core.proto.builder.invoke
 import org.microg.gms.constellation.core.verification.ChallengeProcessor
 import org.microg.gms.constellation.core.verification.MtSmsInboxRegistry
@@ -278,8 +283,28 @@ private suspend fun runVerificationFlow(
                 }
 
         if (!consented) {
-            Log.e(TAG, "Consent has not been set. Not running verification.")
-            throw NoConsentException()
+            Log.e(TAG, "Consent has not been set. Auto-setting consent.")
+            val consentType = ConsentVersion.fromValue(
+                ConsentVersion.valueOf(
+                    request.extras.getString("consent_type") ?: "CONSENT_VERSION_UNSPECIFIED"
+                ).value
+            ) ?: ConsentVersion.RCS_DEFAULT_ON_LEGAL_FYI
+            val setRequest = SetConsentRequest(
+                header_ = RequestHeader(context, sessionId, buildContext, "setConsent"),
+                asterism_client = asterismClient,
+                rcs_consent = RcsConsent(
+                    consent = Consent.CONSENTED,
+                    consent_version = consentType
+                ),
+                consent_version = consentType,
+                api_params = Param.getList(request.extras)
+            )
+            try {
+                RpcClient.phoneDeviceVerificationClient.SetConsent().execute(setRequest)
+                Log.i(TAG, "Auto-consented for $asterismClient")
+            } catch (e: Exception) {
+                Log.w(TAG, "Auto-consent failed", e)
+            }
         }
     }
 
