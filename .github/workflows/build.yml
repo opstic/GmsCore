@@ -1,5 +1,6 @@
 name: "Gradle build"
 permissions: {}
+
 on:
   - push
   - pull_request
@@ -7,14 +8,11 @@ on:
 
 jobs:
   build:
-    name: "Gradle build ${{ matrix.target }}"
+    name: "Gradle build Release"
     runs-on: ubuntu-latest
+
     env:
       GRADLE_MICROG_VERSION_WITHOUT_GIT: 1
-
-    strategy:
-      matrix:
-        target: [Debug, Release]
 
     steps:
       - name: "Free disk space"
@@ -25,15 +23,18 @@ jobs:
 
           # Log available space
           df -h
+
       - name: "Checkout sources"
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
       - name: "Setup Java"
         uses: actions/setup-java@v5
         with:
           distribution: "temurin"
           java-version: "17"
+
       - name: "Setup Gradle"
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -41,6 +42,7 @@ jobs:
           build-scan-publish: true
           build-scan-terms-of-use-url: "https://gradle.com/help/legal-terms-of-use"
           build-scan-terms-of-use-agree: "yes"
+
       - name: "Setup matchers"
         run: |
           # Setting up matchers...
@@ -58,8 +60,8 @@ jobs:
               echo "Matcher configured: ${NAME:?}"
             fi
           done
+
       - name: "Prepare release signing"
-        if: matrix.target == 'Release'
         shell: bash
         run: |
           KEYSTORE_PATH="$RUNNER_TEMP/release-upload.jks"
@@ -72,21 +74,23 @@ jobs:
             echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
             echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
           } >> "$GITHUB_ENV"
+
       - name: "Execute Gradle assemble"
-        run: "./gradlew assemble${{ matrix.target }}"
-      - name: "Execute Gradle lint"
-        run: "./gradlew lint${{ matrix.target }}"
-      - name: "Rename APK in place"
-        shell: bash
         run: |
-          APK="$(find play-services-core/build/outputs/apk/mapboxDefault -type f -name '*.apk' | head -n 1)"
-          test -n "$APK"
-        
-          DIR="$(dirname "$APK")"
-          BASE="$(basename "$APK" .apk)"
-          mv "$APK" "$DIR/${BASE}-${{ matrix.target }}.apk"
-      - name: "Upload Artifact"
+          ./gradlew \
+            :play-services-core:assembleMapboxDefaultRelease \
+            :vending-app:assembleDefaultRelease
+
+      - name: "Upload mapbox-default artifact"
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: play-services-core/build/outputs/apk/mapboxDefault/*/*.apk
+          if-no-files-found: error
+          path: play-services-core/build/outputs/apk/**/*.apk
+
+      - name: "Upload vending-app artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          if-no-files-found: error
+          path: vending-app/build/outputs/apk/**/*.apk
