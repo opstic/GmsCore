@@ -181,6 +181,10 @@ private suspend fun handleVerifyPhoneNumberRequest(
     var phoneNumbers = emptyList<PhoneNumberInfo>()
     var verifications = emptyArray<PhoneNumberVerification>()
     val status = try {
+        if (!ConstellationStateStore.isPhoneNumberVerificationEnabled(context)) {
+            throw PhoneNumberVerificationDisabledException()
+        }
+
         when (readCallbackMode) {
             ReadCallbackMode.LEGACY -> {
                 Log.d(TAG, "Using read-only mode")
@@ -210,12 +214,24 @@ private suspend fun handleVerifyPhoneNumberRequest(
     } catch (e: Exception) {
         Log.e(TAG, "verifyPhoneNumber failed", e)
         when {
+            e is PhoneNumberVerificationDisabledException -> Status(5000)
             readCallbackMode != ReadCallbackMode.NONE -> Status.INTERNAL_ERROR
             e is GrpcException -> handleRpcError(e)
-            e is NoConsentException -> Status(5001)
             else -> Status.INTERNAL_ERROR
         }
     }
+
+    val successful = status.isSuccess && when (readCallbackMode) {
+        ReadCallbackMode.NONE -> verifications.isNotEmpty() &&
+                (request.targetedSims.isEmpty() ||
+                        verifications.size == request.targetedSims.size) &&
+                verifications.all {
+                    it.verificationStatus == Verification.Status.STATUS_VERIFIED.toClientStatus()
+                }
+
+        else -> true
+    }
+    ConstellationStateStore.recordPhoneNumberVerification(context, callingPackage, successful)
 
     if (readCallbackMode == ReadCallbackMode.LEGACY ||
         readCallbackMode == ReadCallbackMode.NONE && legacyCallbackOnFullFlow
@@ -237,6 +253,8 @@ private suspend fun handleVerifyPhoneNumberRequest(
     )
 }
 
+private class PhoneNumberVerificationDisabledException : Exception("Phone number verification is disabled")
+
 private fun handleRpcError(error: GrpcException): Status {
     val statusCode = when (error.grpcStatus) {
         GrpcStatus.RESOURCE_EXHAUSTED -> 5008
@@ -249,8 +267,6 @@ private fun handleRpcError(error: GrpcException): Status {
     }
     return Status(statusCode, error.message)
 }
-
-private class NoConsentException : Exception("No consent")
 
 private suspend fun runVerificationFlow(
     context: Context,
@@ -284,11 +300,7 @@ private suspend fun runVerificationFlow(
 
         if (!consented) {
             Log.e(TAG, "Consent has not been set. Auto-setting consent.")
-            val consentType = ConsentVersion.fromValue(
-                ConsentVersion.valueOf(
-                    request.extras.getString("consent_type") ?: "CONSENT_VERSION_UNSPECIFIED"
-                ).value
-            ) ?: ConsentVersion.RCS_DEFAULT_ON_LEGAL_FYI
+            val consentType = parseConsentVersion(request.extras)
             val setRequest = SetConsentRequest(
                 header_ = RequestHeader(context, sessionId, buildContext, "setConsent"),
                 asterism_client = asterismClient,
@@ -336,6 +348,14 @@ private suspend fun runVerificationFlow(
     }
 
     return verifications
+}
+
+private fun parseConsentVersion(extras: Bundle): ConsentVersion {
+    val value = extras.getString("consent_type")
+    val parsed = value?.toIntOrNull()?.let(ConsentVersion::fromValue)
+        ?: value?.let { runCatching { ConsentVersion.valueOf(it) }.getOrNull() }
+    return parsed?.takeUnless { it == ConsentVersion.CONSENT_VERSION_UNSPECIFIED }
+        ?: ConsentVersion.RCS_DEFAULT_ON_LEGAL_FYI
 }
 
 private fun PhoneNumberVerification.toLegacyPhoneNumberInfoOrNull(): PhoneNumberInfo? {
